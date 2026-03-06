@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import StreamingResponse
 from transformers import AutoModelForImageSegmentation
 from torchvision import transforms
@@ -8,6 +8,10 @@ from PIL import Image
 import torch
 import numpy as np
 import io
+
+# HEIC desteği için
+from pillow_heif import register_heif_opener
+register_heif_opener()
 
 app = FastAPI()
 
@@ -61,27 +65,56 @@ def root():
 
 @app.post("/remove-bg")
 async def remove_background(file: UploadFile = File(...)):
-    contents = await file.read()
-    image = Image.open(io.BytesIO(contents)).convert("RGB")
-    original_size = image.size
+    try:
+        # Dosyayı oku
+        contents = await file.read()
+        
+        print(f"📥 Dosya alındı: {file.filename}, Boyut: {len(contents)} bytes, Tip: {file.content_type}")
+        
+        # Boş dosya kontrolü
+        if len(contents) == 0:
+            raise HTTPException(status_code=400, detail="Boş dosya gönderildi")
+        
+        # Resmi aç (HEIC dahil tüm formatlar desteklenir)
+        image = Image.open(io.BytesIO(contents))
+        
+        # EXIF yönlendirmesini düzelt (iPhone fotoğrafları için önemli)
+        from PIL import ImageOps
+        image = ImageOps.exif_transpose(image)
+        
+        # RGB'ye çevir
+        image = image.convert("RGB")
+        original_size = image.size
+        
+        print(f"✅ Resim açıldı: {original_size}")
 
-    input_tensor = birefnet_transform(image).unsqueeze(0).float()
+        input_tensor = birefnet_transform(image).unsqueeze(0).float()
 
-    with torch.no_grad():
-        preds = birefnet(input_tensor)[-1].sigmoid().cpu()
+        with torch.no_grad():
+            preds = birefnet(input_tensor)[-1].sigmoid().cpu()
 
-    mask = transforms.functional.resize(preds[0], [original_size[1], original_size[0]])
-    mask = mask.squeeze().numpy()
+        mask = transforms.functional.resize(preds[0], [original_size[1], original_size[0]])
+        mask = mask.squeeze().numpy()
 
-    image_np = np.array(image)
-    alpha = (mask * 255).astype(np.uint8)
-    rgba = np.dstack((image_np, alpha))
-    result = Image.fromarray(rgba, "RGBA")
+        image_np = np.array(image)
+        alpha = (mask * 255).astype(np.uint8)
+        rgba = np.dstack((image_np, alpha))
+        result = Image.fromarray(rgba, "RGBA")
 
-    output = io.BytesIO()
-    result.save(output, format="PNG")
-    output.seek(0)
-    return StreamingResponse(output, media_type="image/png")
+        output = io.BytesIO()
+        result.save(output, format="PNG")
+        output.seek(0)
+        
+        print("✅ Arka plan kaldırıldı!")
+        
+        return StreamingResponse(output, media_type="image/png")
+        
+    except Exception as e:
+        print(f"❌ HATA: {str(e)}")
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Resim işlenemedi: {str(e)}"
+        )
     
 if __name__ == "__main__":
     import uvicorn
