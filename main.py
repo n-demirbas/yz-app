@@ -11,6 +11,15 @@ import io
 
 app = FastAPI()
 
+# Dosya boyutu limitini kaldır
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class UnlimitedUploadMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        return await call_next(request)
+
+app.add_middleware(UnlimitedUploadMiddleware)
+
 # BiRefNet
 print("BiRefNet yükleniyor...")
 birefnet = AutoModelForImageSegmentation.from_pretrained(
@@ -76,4 +85,10 @@ async def remove_background(file: UploadFile = File(...)):
     
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=8000,
+        limit_max_requests=1000,
+        timeout_keep_alive=300
+    )
