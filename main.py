@@ -73,21 +73,7 @@ async def remove_background(file: UploadFile = File(...)):
     result.save(output, format="PNG")
     output.seek(0)
     return StreamingResponse(output, media_type="image/png")
-
-    @app.post("/upscale")
-async def upscale_image(file: UploadFile = File(...)):
-    contents = await file.read()
-    image = Image.open(io.BytesIO(contents)).convert("RGB")
-    img_np = np.array(image)
-
-    output_np, _ = upsampler.enhance(img_np, outscale=4)
-    result = Image.fromarray(output_np)
-
-    output = io.BytesIO()
-    result.save(output, format="PNG")
-    output.seek(0)
-    return StreamingResponse(output, media_type="image/png")
-
+    
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
